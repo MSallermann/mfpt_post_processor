@@ -12,6 +12,7 @@
 #include <optional>
 #include <xtensor/xarray.hpp>
 #include <xtensor/xcsv.hpp>
+#include <xtensor/xio.hpp>
 #include <xtensor/xnpy.hpp>
 #include <xtensor/xsort.hpp>
 #include <xtensor/xview.hpp>
@@ -21,9 +22,15 @@ int main( int argc, char * argv[] )
 {
     argparse::ArgumentParser program( "mfpt_processor" );
 
-    program.add_argument( "trajectory_folder" ).help( "" );
-    program.add_argument( "--n_disc" ).help( "" ).default_value( 100 ).scan<'i', int>();
-    program.add_argument( "--min_samples" ).help( "" ).default_value( 10 ).scan<'i', int>();
+    program.add_argument( "trajectory_folder" ).help( "Trajectory folder" );
+    program.add_argument( "--n_disc" )
+        .help( "Number of values to discretise the interval to" )
+        .default_value( 100 )
+        .scan<'i', int>();
+    program.add_argument( "--min_samples" )
+        .help( "Minimum number of samples to consider per data point" )
+        .default_value( 10 )
+        .scan<'i', int>();
 
     try
     {
@@ -47,7 +54,7 @@ int main( int argc, char * argv[] )
         fmt::print( "Processing {}\n", entry.path().string() );
 
         int N_TRAJECTORIES = std::distance( fs::directory_iterator( trajectory_folder ), fs::directory_iterator{} ) + 1;
-        xt::xtensor<double, 2> order_param_passage_times = xt::zeros<double>( { N_TRAJECTORIES, N_DISC } );
+        xt::xtensor<double, 2> order_param_passage_times = -xt::ones<double>( { N_TRAJECTORIES, N_DISC } );
         int idx_traj                                     = 0;
 
         fmt::print( "Found {} trajectories\n", N_TRAJECTORIES );
@@ -68,28 +75,22 @@ int main( int argc, char * argv[] )
 
             for( int irow = 0; irow < data_current.shape( 0 ); irow++ )
             {
-                auto row  = xt::view( data_current, irow, xt::all() );
-                auto t    = row[0] - t0;
-                auto o    = row[-1];
-                auto omax = order_param[idx_max_order_param];
+                auto row    = xt::view( data_current, irow, xt::all() );
+                double t    = row[0] - t0;
+                double o    = row.periodic( -1 );
+                double omax = order_param[idx_max_order_param];
 
-                //  Is the current order param higher than the current max?
-                //  If yes, we add the time to the passage times array
+                // Is the current order param higher than the current max?
+                // If yes, we add the time to the passage times array
+                if( o >= xt::amax( order_param )() )
+                {
+                    break;
+                }
+
                 if( o > omax )
                 {
                     auto idx_new_max = xt::argmax( order_param > o )[0];
-
-                    if( idx_new_max == 0 )
-                    {
-                        idx_new_max = N_DISC;
-
-                        auto v = xt::view(
-                            order_param_passage_times, idx_traj, xt::range( idx_max_order_param, idx_new_max ) )
-                            = -1;
-                        break;
-                    }
-
-                    xt::view( order_param_passage_times, idx_traj, xt::range( idx_max_order_param, idx_new_max ) ) += t;
+                    xt::view( order_param_passage_times, idx_traj, xt::range( idx_max_order_param, idx_new_max ) ) = t;
                     idx_max_order_param = idx_new_max;
                 }
 
@@ -110,23 +111,16 @@ int main( int argc, char * argv[] )
         for( int idx_o = 0; idx_o < N_DISC; idx_o++ )
         {
             auto times         = xt::view( order_param_passage_times, xt::all(), idx_o );
-            auto not_nan_times = xt::filter( times, times > 0 );
+            auto not_nan_times = xt::filter( times, times >= 0 );
             n_samples[idx_o]   = not_nan_times.shape( 0 );
-
-            fmt::print( "idx_o {}\n", idx_o );
-            fmt::print( "n_samples {}\n", n_samples[idx_o] );
 
             if( n_samples[idx_o] == 0 )
             {
                 continue;
             }
             mean_passage_times[idx_o] = xt::mean( not_nan_times )();
-            fmt::print( "mean_passage_times {}\n", mean_passage_times[idx_o] );
-
-            std_passage_times[idx_o] = xt::stddev( not_nan_times )() / std::sqrt( n_samples[idx_o] );
+            std_passage_times[idx_o]  = xt::stddev( not_nan_times )() / std::sqrt( n_samples[idx_o] );
         }
-
-        std::cout << mean_passage_times[2] << "\n";
 
         order_param        = xt::filter( order_param, n_samples >= MIN_SAMPLES );
         mean_passage_times = xt::filter( mean_passage_times, n_samples >= MIN_SAMPLES );
@@ -136,12 +130,14 @@ int main( int argc, char * argv[] )
         std::ofstream outfile;
         outfile.open( entry.path() / fs::path( "mean_times.txt" ) );
 
-        xt::xtensor<double, 2> res
-            = xt::hstack( xt::xtuple( order_param, mean_passage_times, std_passage_times, n_samples ) );
+        // std::cout << order_param << "\n";
+        // std::cout << mean_passage_times << "\n";
+        // std::cout << std_passage_times << "\n";
+        // std::cout << n_samples << "\n";
 
-        // std::cout << res << "\n";
-        xt::dump_csv( outfile, res );
-        // mean_passage_times = xt::filter( mean_passage_times, n_samples >= MIN_SAMPLES );
+        auto res = xt::stack( xt::xtuple( order_param, mean_passage_times, std_passage_times, n_samples ) );
+
+        xt::dump_csv( outfile, xt::transpose( res ) );
 
         outfile.close();
     }
