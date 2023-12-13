@@ -1,7 +1,5 @@
 #include "xtensor/xbuilder.hpp"
 #include "xtensor/xslice.hpp"
-#include <fmt/format.h>
-#include <fmt/ostream.h>
 #include <argparse/argparse.hpp>
 #include <cmath>
 #include <filesystem>
@@ -9,7 +7,6 @@
 #include <functional>
 #include <iostream>
 #include <istream>
-#include <optional>
 #include <xtensor/xarray.hpp>
 #include <xtensor/xcsv.hpp>
 #include <xtensor/xio.hpp>
@@ -38,7 +35,7 @@ int main( int argc, char * argv[] )
     }
     catch( const std::runtime_error & err )
     {
-        fmt::print( stderr, "{}\n{}", err.what(), fmt::streamed( program ) );
+        std::cerr << err.what() << "\n" << program << "\n";
         return 1;
     }
 
@@ -51,29 +48,29 @@ int main( int argc, char * argv[] )
 
     for( const auto & entry : fs::directory_iterator( trajectory_folder ) )
     {
-        fmt::print( "Processing {}\n", entry.path().string() );
 
         int N_TRAJECTORIES = std::distance( fs::directory_iterator( trajectory_folder ), fs::directory_iterator{} ) + 1;
         xt::xtensor<double, 2> order_param_passage_times = -xt::ones<double>( { N_TRAJECTORIES, N_DISC } );
         int idx_traj                                     = 0;
 
-        fmt::print( "Found {} trajectories\n", N_TRAJECTORIES );
+        std::cout << "Processing " << entry.path().string() << "\n";
+        std::cout << "Found " << N_TRAJECTORIES << " trajectories\n";
+
         for( const auto & traj_file : fs::directory_iterator( entry ) )
         {
 
             if( traj_file.path().extension() != ".npy" )
             {
-                fmt::print( ".... Skipping {}\n", traj_file.path().string() );
+                std::cout << ".... skipping " << traj_file.path().string() << "\n";
                 continue;
             }
-
-            fmt::print( ".... {}\n", traj_file.path().string() );
+            std::cout << ".... " << traj_file.path().string() << "\n";
 
             auto data_current       = xt::load_npy<double>( traj_file.path().string() );
             int idx_max_order_param = 0;
             auto t0                 = data_current( 0, 0 );
 
-            for( int irow = 0; irow < data_current.shape( 0 ); irow++ )
+            for( size_t irow = 0; irow < data_current.shape( 0 ); irow++ )
             {
                 auto row    = xt::view( data_current, irow, xt::all() );
                 double t    = row[0] - t0;
@@ -82,21 +79,15 @@ int main( int argc, char * argv[] )
 
                 // Is the current order param higher than the current max?
                 // If yes, we add the time to the passage times array
-                if( o >= xt::amax( order_param )() )
+                if( o < 0.9 )
                 {
-                    break;
-                }
-
-                if( o > omax )
-                {
-                    auto idx_new_max = xt::argmax( order_param > o )[0];
-                    xt::view( order_param_passage_times, idx_traj, xt::range( idx_max_order_param, idx_new_max ) ) = t;
-                    idx_max_order_param = idx_new_max;
-                }
-
-                if( o >= xt::amax( order_param )() )
-                {
-                    break;
+                    if( o > omax )
+                    {
+                        auto idx_new_max = xt::argmax( order_param > o )[0];
+                        xt::view( order_param_passage_times, idx_traj, xt::range( idx_max_order_param, idx_new_max ) )
+                            = t;
+                        idx_max_order_param = idx_new_max;
+                    }
                 }
             }
 
