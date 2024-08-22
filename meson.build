@@ -4,14 +4,11 @@ project('mfpt_processor', 'cpp',
 
 add_global_arguments('-Wno-unused-local-typedefs', language : 'cpp')
 
-incdir = include_directories('include')
-
 sources_seldon = [
   'src/main.cpp',
 ]
 
 exe = executable('mfpt_processor', sources_seldon + 'src/main.cpp',
   install : true,
-  dependencies : [dependency('xtensor'), dependency('fmt')],
-  include_directories : incdir
+  dependencies : [dependency('xtensor'), dependency('fmt')]
 )
