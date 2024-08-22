@@ -10,5 +10,5 @@ sources_seldon = [
 
 exe = executable('mfpt_processor', sources_seldon + 'src/main.cpp',
   install : true,
-  dependencies : [dependency('xtensor'), dependency('fmt')]
+  dependencies : [dependency('xtensor')]
 )
